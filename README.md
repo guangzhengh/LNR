@@ -26,7 +26,7 @@ Change the `data_path` in `config/*/*.yaml` accordingly.
 
 **Finetune with LNR**:
 
-To train a model for Stage-2 with *one GPU* (all the above datasets), run:
+To train a model for MiSLAS Stage-2 with LNR enhanced, run:
 
 ```
 python train_stage2_lnr.py --cfg config\cifar100\cifar100_imb001_stage2_mislas.yaml
