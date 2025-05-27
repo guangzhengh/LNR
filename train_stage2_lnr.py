@@ -310,7 +310,7 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
 
 
 import pickle
-def label_noise_rebalance(train_dataloader,net,classifier, unique_id, args, thre = 3, class_num = 100, read = False, store = False, dataset_name = 0):
+def label_noise_rebalance(train_dataloader,net,classifier, unique_id, args, thre = 3, class_num = 100, read = False, store = False, dataset_name = 'none'):
     if not read and not store:
         return None
     if read:

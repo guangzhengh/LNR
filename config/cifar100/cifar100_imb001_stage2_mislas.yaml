@@ -54,3 +54,5 @@ num_epochs: 100
 momentum: 0.9
 mixup: False
 alpha: null
+valsize_factor: 1
+valbalance: 1

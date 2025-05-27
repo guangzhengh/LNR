@@ -86,7 +86,7 @@ class IMBALANCECIFAR100(torchvision.datasets.CIFAR100):
 
 class CIFAR100_LT(object):
     def __init__(self, distributed, root='./data/cifar100', imb_type='exp',
-                    imb_factor=0.01, batch_size=128, num_works=40):
+                    imb_factor=0.01, batch_size=128, num_works=40, config=None):
 
         train_transform = transforms.Compose([
         transforms.ToTensor(),
@@ -108,7 +108,7 @@ class CIFAR100_LT(object):
         train_dataset = IMBALANCECIFAR100(root=root, imb_type=imb_type, imb_factor=imb_factor, rand_number=4, train=True, download=True, transform=train_transform)
         
         eval_dataset = torchvision.datasets.CIFAR100(root=root, train=False, download=True, transform=eval_transform)
-        val_dataset = IMBALANCECIFAR100(root=root, imb_type=imb_type, imb_factor=1, rand_number=1223, train=False, download=True, transform=eval_transform, size=1)
+        val_dataset = IMBALANCECIFAR100(root=root, imb_type=imb_type, imb_factor=config.valbalance, rand_number=1223, train=False, download=True, transform=eval_transform, size=config.valsize_factor)
         self.cls_num_list = train_dataset.get_cls_num_list()
         print(self.cls_num_list)
         self.dist_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed else None
