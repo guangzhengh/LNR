@@ -1,4 +1,43 @@
-torchvision==0.4.0
-torch==1.2.0
-numpy==1.19.2
+numpy
 yacs==0.1.8
+
+
+**Reply to Information Loss caused by label flipping mentioned in Claims And Evidence and Weakness 2**
+- We sincerely appreciate your insight regarding the potential information loss in the majority class due to label flipping. In our LNR framework, the majority-class samples selected for flipping are primarily outliers that have deeply encroached into the minority-class region beyond the optimal decision boundary. In this way, LNR enriches the minority class while preserving the core distribution of the majority class.
+
+-  Compared to undersampling approaches that discard large numbers of majority class samples (especially in extreme imbalance scenarios), LNR requires significantly fewer data-editing (only 94 label flips on CIFAR10-LT), mitigating information loss.
+
+- The number of flips can be regulated through the threshold $t_{flip}$, which can be optimally selected through cross-validation to avoid unexpected negative impacts on majority class classification performance. Sensitivity analysis (Appendix C.3) and Tables 1–2 show that with a well-calibrated $\t_{flip}$, LNR enhances minority-class performance without compromising overall accuracy—a worthwhile trade-off we argue is justified given the empirical gains. 
+
+- In the revised version, we will adjust our claim on "information loss," acknowledging that trade-offs (and information loss) exist but can be well-controlled.
+
+**Reply to comment in Essential References Not Discussed section and Weakness 1**
+
+- We sincerely appreciate your valuable feedback regarding the need to incorporate more recent literature in our manuscript. We have carefully considered your suggestion and have added our discussion of the latest approaches in imbalanced learning (please refer to our response to Reviewer AMhG for details).
+
+- To strengthen our comparative analysis, we have included comparisons with state-of-the-art methods such as MiSLAS, ReMix, and SelMix. However, we encountered some practical challenges in implementation: ReMix does not provide official code, and SelMix lacks reproducible code for its supervised version. Experiments on CIFAR100 and ImageNet require more time for proper adaptation and reproduction due to framework-specific complexities. We will include these results during the rebuttal period to provide a more comprehensive comparison once we have the results. The experiment results on CIFAR10 (IR=100) is shown below:
+
+|| CIFAR10-LT (IR=100) | | | | |
+|:-:|:-:|:-:|:-:|:-:|:-:|
+||Overall Accuracy|Many-shot|Medium-shot|Few-shot|ECE|
+|MiSLAS-stage2 |82.1|**91.0**|**80.2**|75.7|**3.70**|
+|MiSLAS+ReMix  |82.9| 90.0|79.8|79.8|19.6|
+|MiSLAS+SelMix* |83.3| - | - | - | - |
+|MiSLAS+LNR|**83.4**|87.6| **80.1**|**83.6**|**4.26**|
+
+**Reply to Weakness 1**
+
+We thank the reviewer for noting our method's and SelMix's conceptual similarities. While both methods share the common goal of improving imbalanced classification, we would like to clarify the fundamental differences in our approach:
+
+- SelMix computes a gain matrix using class centroids from a **balanced validation set** to guide its mixup sampling at the **class level**. While this shares some conceptual similarities with our label noise selection process based on feature similarity ranks, LNR differs fundamentally: We **only flip labels** of majority class samples that exhibit **instance-level** feature similarity to minority classes **without requiring any auxiliary data** and **no feature mixing nor sample generating**.
+
+- Any sample with features similar to those of the minority class may be flipped to that class, **regardless of how far the feature centroids of the two classes are**. In Figure 1, although the class feature centroid of majority class 2 is relatively close to class 9, the samples flipped to class 9 by LNR primarily come from classes 4 and 8, as these show stronger instance-level similarity to the minority class.
+
+Notably, as shown in our CIFAR-10 experiments, LNR achieves comparable performance to SelMix while **eliminating its dependency on validation data**. This makes LNR more practical for real-world scenarios where such **balanced datasets may be unavailable**. 
+
+We will expanded our discussion of these comparative advantages in the revised manuscript (Section 3.2) to better highlight LNR's unique contributions to the field.
+
+**Reply to Weakness 3&4**
+
+Our tabular binary classification experiments compared widely recognized **pure data-level** approaches that maintain **model-agnostic** properties (no loss editing) on classic ML methods like KNN, CART, and MLP.
+Recent methods (DeepSMOTE/ReMix/SelMix) use feature augmentation and custom losses, making them unsuitable for tabular data or simple classifiers. Our KEEL results demonstrate LNR's **model-data-agnostic** advantages, while image experiment results show SOTA performance, highlighting our contributions. Comprehensive synthetic data analyses are provided in supplementary materials to address performance across distributions. 

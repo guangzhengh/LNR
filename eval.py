@@ -268,7 +268,7 @@ def validate(val_loader, model, classifier, lws_model, criterion, config, logger
             else:
                 feat = model(images)
             output = classifier(feat)
-            output = lws_model(output)
+            #output = lws_model(output)
             loss = criterion(output, target)
 
             # measure accuracy and record loss

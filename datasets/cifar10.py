@@ -11,14 +11,14 @@ class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
 
     def __init__(self, root, imb_type='exp', imb_factor=0.01, rand_number=0, train=True,
                  transform=None, target_transform=None,
-                 download=False):
+                 download=False, size = 1):
         super(IMBALANCECIFAR10, self).__init__(root, train, transform, target_transform, download)
         np.random.seed(rand_number)
-        img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor)
+        img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor, size)
         self.gen_imbalanced_data(img_num_list)
 
-    def get_img_num_per_cls(self, cls_num, imb_type, imb_factor):
-        img_max = len(self.data) / cls_num
+    def get_img_num_per_cls(self, cls_num, imb_type, imb_factor,size=1):
+        img_max = len(self.data) / cls_num / size
         img_num_per_cls = []
         if imb_type == 'exp':
             for cls_idx in range(cls_num):
@@ -56,6 +56,27 @@ class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
         for i in range(self.cls_num):
             cls_num_list.append(self.num_per_cls_dict[i])
         return cls_num_list
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = self.data[index], self.targets[index]
+
+        # print("cifar10 img:", img)
+        # print("cifar10 target:", target)
+
+        if self.transform is not None:
+
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return index, img, target
 
 
 
@@ -65,6 +86,8 @@ class CIFAR10_LT(object):
                     imb_factor=0.01, batch_size=128, num_works=40):
 
         train_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.ToPILImage(),
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
@@ -78,9 +101,10 @@ class CIFAR10_LT(object):
         ])
         
         
-        train_dataset = IMBALANCECIFAR10(root=root, imb_type=imb_type, imb_factor=imb_factor, rand_number=0, train=True, download=True, transform=train_transform)
+        train_dataset = IMBALANCECIFAR10(root=root, imb_type=imb_type, imb_factor=imb_factor, rand_number=4, train=True, download=True, transform=train_transform)
         eval_dataset = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=eval_transform)
-        
+        val_dataset = IMBALANCECIFAR10(root=root, imb_type=imb_type, imb_factor=1, rand_number=1223, train=False, download=True, transform=eval_transform, size=1)
+
         self.cls_num_list = train_dataset.get_cls_num_list()
 
         self.dist_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed else None
@@ -99,3 +123,6 @@ class CIFAR10_LT(object):
             eval_dataset,
             batch_size=batch_size, shuffle=False,
             num_workers=num_works, pin_memory=True)
+        self.val =  val_dataset
+        self.train_dataset = train_dataset
+        print('train',self.cls_num_list)

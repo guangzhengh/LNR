@@ -1,17 +1,17 @@
 name: ina2018_resnet50_stage2_mislas
 print_freq: 200
-workers: 48
+workers: 1
 log_dir: 'logs'
 model_dir: 'ckps'
 
 
 # dataset & model setting
 dataset: 'ina2018'
-data_path: 'Path/to/Data/iNaturalist2018'
+data_path: 'data\train_val2018'
 num_classes: 8142
 imb_factor: null
 backbone: 'resnet50_fe'
-resume: 'Path/to/Stage1_checkpoint.pth.tar'
+resume: './saved/ina2018_clean/ckps/model_best.pth.tar'
 head_class_idx:
   - 0
   - 842
@@ -36,14 +36,14 @@ multiprocessing_distributed: False
 
 # Train
 mode: 'stage2'
-smooth_head: 0.3
+smooth_head: 0.4
 smooth_tail: 0.0
 shift_bn: True
 lr_factor: 0.05
 lr: 0.1
 batch_size: 256
 weight_decay: 1e-4
-num_epochs: 10
+num_epochs: 30
 momentum: 0.9
 mixup: False
 alpha: null

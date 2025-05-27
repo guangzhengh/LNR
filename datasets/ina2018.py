@@ -52,7 +52,7 @@ class LT_Dataset(Dataset):
             sample = Image.open(f).convert('RGB')
         if self.transform is not None:
             sample = self.transform(sample)
-        return sample, target 
+        return index, sample, target 
     
 
 
@@ -82,15 +82,17 @@ class LT_Dataset_Eval(Dataset):
             sample = Image.open(f).convert('RGB')
         if self.transform is not None:
             sample = self.transform(sample)
-        return sample, target 
-
-
+        return index, sample, target 
+    
+    
 class iNa2018(object):
     def __init__(self, distributed, root="", batch_size=60, num_works=40):
         
         normalize = transforms.Normalize(mean=[0.466, 0.471, 0.380], std=[0.195, 0.194, 0.192])
         
         transform_train = transforms.Compose([
+            #transforms.ToTensor(),
+            #transforms.ToPILImage(),
             transforms.RandomResizedCrop(224),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0),

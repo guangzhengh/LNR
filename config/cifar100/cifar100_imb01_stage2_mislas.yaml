@@ -11,7 +11,7 @@ data_path: './data/cifar100'
 num_classes: 100
 imb_factor: 0.1
 backbone: 'resnet32_fe'
-resume: 'Path/to/Stage1_checkpoint.pth.tar'
+resume: './cifar100_imb01_stage2_mislas.pth.tar'
 head_class_idx:
   - 0
   - 36
@@ -42,8 +42,8 @@ shift_bn: True
 lr_factor: 0.1
 lr: 0.1
 batch_size: 128
-weight_decay: 2e-4
-num_epochs: 10
+weight_decay: 5e-4
+num_epochs: 20
 momentum: 0.9
 mixup: False
 alpha: null

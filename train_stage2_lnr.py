@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 import pprint
 import math
-
+import copy
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -34,7 +34,8 @@ from utils import accuracy, calibration
 
 from methods import mixup_data, mixup_criterion
 from methods import LabelAwareSmoothing, LearnableWeightScaling
-
+from utils.metrics_selmix import *
+from sklearn.metrics import confusion_matrix
 
 def parse_args():
     parser = argparse.ArgumentParser(description='MiSLAS training (Stage-2)')
@@ -182,6 +183,7 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
             block = torch.nn.DataParallel(block).cuda()
 
     # optionally resume from a checkpoint
+    
     if config.resume:
         if os.path.isfile(config.resume):
             logger.info("=> loading checkpoint '{}'".format(config.resume))
@@ -192,6 +194,7 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
                 loc = 'cuda:{}'.format(config.gpu)
                 checkpoint = torch.load(config.resume, map_location=loc)
             # config.start_epoch = checkpoint['epoch']
+            print(checkpoint.keys())
             best_acc1 = checkpoint['best_acc1']
             its_ece = checkpoint['its_ece']
             if config.gpu is not None:
@@ -199,12 +202,27 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
                 best_acc1 = best_acc1.to(config.gpu)
             model.load_state_dict(checkpoint['state_dict_model'])
             classifier.load_state_dict(checkpoint['state_dict_classifier'])
+            lws_model.load_state_dict(checkpoint['state_dict_lws_model'])
             if config.dataset == 'places':
                 block.load_state_dict(checkpoint['state_dict_block'])
             logger.info("=> loaded checkpoint '{}' (epoch {})"
                         .format(config.resume, checkpoint['epoch']))
         else:
             logger.info("=> no checkpoint found at '{}'".format(config.resume))
+
+        if os.path.isfile(config.noisemodel):
+            logger.info("=> loading checkpoint '{}'".format(config.noisemodel))
+            if config.gpu is None:
+                checkpoint = torch.load(config.noisemodel)
+            else:
+                loc = 'cuda:{}'.format(config.gpu)
+                checkpoint = torch.load(config.noisemodel, map_location=loc)
+            model_n = copy.deepcopy(model)
+            classifier_n = copy.deepcopy(classifier)
+            lws_model_n = copy.deepcopy(lws_model)
+            model_n.load_state_dict(checkpoint['state_dict_model'])
+            classifier_n.load_state_dict(checkpoint['state_dict_classifier'])
+            lws_model_n.load_state_dict(checkpoint['state_dict_lws_model'])
 
     # Data loading code
     if config.dataset == 'cifar10':
@@ -228,8 +246,10 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
                           batch_size=config.batch_size, num_works=config.workers)
 
     train_loader = dataset.train_balance
+    train_loader_all = dataset.train_balance
     val_loader = dataset.eval
     cls_num_list = dataset.cls_num_list
+    train_dataset = dataset.train_dataset
     if config.distributed:
         train_sampler = dataset.dist_sampler
 
@@ -242,7 +262,9 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
                                 {'params': lws_model.parameters()}], config.lr,
                                 momentum=config.momentum,
                                 weight_decay=config.weight_decay)
-
+    is_best = 1
+    best_acc1 = 0
+    bepoch = 0
     for epoch in range(config.num_epochs):
         if config.distributed:
             train_sampler.set_epoch(epoch)
@@ -252,7 +274,7 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
         if config.dataset != 'places':
             block = None
         # train for one epoch
-        train(train_loader, model, classifier, lws_model, criterion, optimizer, epoch, config, logger, block)
+        train_lnr(train_loader,train_loader_all, model, classifier, lws_model, criterion, optimizer, epoch, config, logger,model_n,classifier_n,lws_model_n, block, is_best, cls_num_list)
 
         # evaluate on validation set
         acc1, ece = validate(val_loader, model, classifier, lws_model, criterion, config, logger, block)
@@ -261,7 +283,8 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
         best_acc1 = max(acc1, best_acc1)
         if is_best:
             its_ece = ece
-        logger.info('Best Prec@1: %.3f%% ECE: %.3f%%\n' % (best_acc1, its_ece))
+            bepoch = epoch
+        logger.info('Best Prec@1: %.3f%% ECE: %.3f%% at round %.3f%%\n' % (best_acc1, its_ece, bepoch))
         if not config.multiprocessing_distributed or (config.multiprocessing_distributed
                                                       and config.rank % ngpus_per_node == 0):
             if config.dataset == 'places':
@@ -285,7 +308,103 @@ def main_worker(gpu, ngpus_per_node, config, logger, model_dir):
                 }, is_best, model_dir)
 
 
-def train(train_loader, model, classifier, lws_model, criterion, optimizer, epoch, config, logger, block=None):
+
+import pickle
+def label_noise_rebalance(train_dataloader,net,classifier, unique_id, args, thre = 3, class_num = 100, read = False, store = False, dataset_name = 0):
+    if not read and not store:
+        return None
+    if read:
+        if os.path.exists('uid_'+str(unique_id)+'_noise_info_'+dataset_name+'.pkl'):
+            print('read')
+            with open('uid_'+str(unique_id)+'_noise_info_'+dataset_name+'.pkl','rb') as j:
+                noise_info = pickle.load(j)
+            return noise_info
+        else:
+            return None
+
+    pre_dict = {}
+    for e in range(2):
+        print(e)
+        for batch_idx, (index, x, target) in enumerate(train_dataloader):
+            index, x, target = index, x.cuda(args.gpu, non_blocking=True), target.cuda(args.gpu, non_blocking=True)
+            feat = net(x)
+            out = classifier(feat.detach())
+            pospre = F.softmax(out, dim=1).cpu().detach().numpy()
+            target = target.long()
+            for i, value in enumerate(x.cpu()):
+                if str(index[i]) in pre_dict:
+                    pre_dict[str(index[i])].append((pospre[i],target.cpu().detach().numpy()[i]))
+                else:
+                    pre_dict[str(index[i])] = [(pospre[i],target.cpu().detach().numpy()[i])]
+
+    targets = np.array([t[0][1] for t in pre_dict.values()])
+    for k,v in pre_dict.items():
+        pre_dict[k] = (np.mean(np.array([item[0] for item in v]),axis = 0), v[0][1])
+    preds = np.array([t[0] for t in pre_dict.values()])
+    classes = np.array(list(range(class_num)))
+    cls,cls_cnt = np.unique(targets, return_counts=True)
+    priors = []
+    for c in classes:
+        if c in cls:
+            priors.append(cls_cnt[np.where(cls == c)[0]][0])
+        else:
+            priors.append(0)
+    
+    priors = np.array(priors)
+    priors = 1-  (priors - np.min(priors))/(np.max(priors)-np.min(priors))
+    preds_mean, preds_std = [],[]
+    comp = {}
+    for k in classes:
+        comp[k] = {}
+
+    for k in classes:
+        if len(preds[np.where(targets != k)[0],k]) > 1:
+            preds_mean.append(np.mean(preds[np.where(targets != k)[0],k]))
+            preds_std.append(np.std(preds[np.where(targets != k)[0],k]))
+        else:
+            preds_mean.append(0)
+            preds_std.append(-1)
+
+    zscores = {}
+    fliprate = {}
+    noisecnt = 0
+    noise_flag = {}    
+    label_cnt = {key: 0 for key in range(len(classes))}   
+
+    for key,value in pre_dict.items():
+        (pred_prob, c) = value
+        zscores[key] = (pred_prob - np.array(preds_mean)) / np.array(preds_std)
+        prior_weight = np.array([max(p-priors[c],0) for p in priors])
+        fliprate[key] = np.tanh((zscores[key]-thre))*prior_weight
+        uniform_rand = np.random.rand(len(classes))
+        noise_class = np.where(fliprate[key] > uniform_rand)[0]
+        if len(noise_class):
+            compare_flip = fliprate[key][noise_class]
+            highest_flip = np.where(compare_flip == max(compare_flip))[0]
+            noise_idx = noise_class[highest_flip]
+            noisecnt += len(noise_idx)
+            noise_flag[key] = classes[noise_idx]
+            label_cnt[classes[noise_idx][0]] += 1
+            if classes[noise_idx][0] not in comp[c]:
+                comp[c][classes[noise_idx][0]] = 1
+            else:
+                comp[c][classes[noise_idx][0]] += 1
+        else:
+            label_cnt[c] += 1
+
+    
+    noise_info={}
+    noise_info['noise_flag'] = noise_flag
+
+    if store:
+        with open('uid_'+str(unique_id)+'_noise_info_'+dataset_name+'.pkl', 'wb') as file:
+            pickle.dump(noise_info, file)
+    print('label flipping dict:', comp)
+    print('total label noise:', noisecnt)
+    print('after rebalancing:', label_cnt)
+    return noise_info
+
+def train_lnr(train_loader,train_loader_all, model, classifier, lws_model, criterion, optimizer, epoch, config, logger,model_n,classifier_n,lws_model_n, block=None, is_best = 0, cls_num_list = None):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.3f')
@@ -314,11 +433,24 @@ def train(train_loader, model, classifier, lws_model, criterion, optimizer, epoc
     classifier.train()
 
     end = time.time()
-
-    for i, (images, target) in enumerate(train_loader):
+    if config.num_classes == 10:
+        thre = 7.5
+    else:
+        thre = 14.5
+    if epoch == 0:
+        noise_info = label_noise_rebalance(train_loader_all,model,classifier,config.uid,
+                                              config, thre = thre, class_num = config.num_classes, read = 0, store= 1, dataset_name=config.dataset)
+    noise_info = label_noise_rebalance(train_loader_all,model,classifier,config.uid,
+                                              config, thre = thre, class_num = config.num_classes, read = 1, store= 0, dataset_name=config.dataset)
+    fflag = 0        
+    for i, (index, images, target) in enumerate(train_loader):
         if i > end_steps:
             break
-
+        if epoch >= 0:
+            for j, value in enumerate(index):
+                if str(index[j]) in noise_info['noise_flag'].keys():
+                    fflag = fflag + 1
+                    target[j] = noise_info['noise_flag'][str(index[j])][0]
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -335,7 +467,7 @@ def train(train_loader, model, classifier, lws_model, criterion, optimizer, epoc
                     feat = model(images)
             output = classifier(feat.detach())
             output = lws_model(output)
-            loss = mixup_criterion(criterion, output, targets_a, targets_b, lam)
+            loss = mixup_criterion(criterion, output, targets_a, targets_b, lam, n = cls_num_list)
         else:
             # compute output
             with torch.no_grad():
@@ -346,7 +478,7 @@ def train(train_loader, model, classifier, lws_model, criterion, optimizer, epoc
             output = classifier(feat.detach())
             output = lws_model(output)
             loss = criterion(output, target)
-
+        
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
         losses.update(loss.item(), images.size(0))
         top1.update(acc1[0], images.size(0))
@@ -363,6 +495,8 @@ def train(train_loader, model, classifier, lws_model, criterion, optimizer, epoc
 
         if i % config.print_freq == 0:
             progress.display(i, logger)
+    print('noise:', fflag)
+
 
 
 def validate(val_loader, model, classifier, lws_model, criterion, config, logger, block=None):
@@ -401,6 +535,7 @@ def validate(val_loader, model, classifier, lws_model, criterion, config, logger
             else:
                 feat = model(images)
             output = classifier(feat)
+            #if not config.mixup:
             output = lws_model(output)
             loss = criterion(output, target)
 
@@ -421,14 +556,14 @@ def validate(val_loader, model, classifier, lws_model, criterion, config, logger
             confidence = np.append(confidence, confidence_part.cpu().numpy())
             pred_class = np.append(pred_class, pred_class_part.cpu().numpy())
             true_class = np.append(true_class, target.cpu().numpy())
-
+            
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
 
             if i % config.print_freq == 0:
                 progress.display(i, logger)
-
+        cm = confusion_matrix(true_class, pred_class)
         acc_classes = correct / class_num
         head_acc = acc_classes[config.head_class_idx[0]:config.head_class_idx[1]].mean() * 100
         med_acc = acc_classes[config.med_class_idx[0]:config.med_class_idx[1]].mean() * 100
@@ -438,7 +573,8 @@ def validate(val_loader, model, classifier, lws_model, criterion, config, logger
 
         cal = calibration(true_class, pred_class, confidence, num_bins=15)
         logger.info('* ECE   {ece:.3f}%.'.format(ece=cal['expected_calibration_error'] * 100))
-
+        print('* confusion matrix   : ', cm.diagonal())
+        
     return top1.avg, cal['expected_calibration_error'] * 100
 
 
@@ -454,7 +590,6 @@ def adjust_learning_rate(optimizer, epoch, config):
     lr_min = 0
     lr_max = config.lr
     lr = lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(epoch / config.num_epochs * 3.1415926535))
-
     for idx, param_group in enumerate(optimizer.param_groups):
         if idx == 0:
             param_group['lr'] = config.lr_factor * lr

@@ -24,7 +24,7 @@ class LT_Dataset(Dataset):
                 self.targets.append(int(line.split()[1]))
         
         cls_num_list_old = [np.sum(np.array(self.targets) == i) for i in range(self.num_classes)]
-        
+
         # generate class_map: class index sort by num (descending)
         sorted_classes = np.argsort(-np.array(cls_num_list_old))
         self.class_map = [0 for i in range(self.num_classes)]
@@ -52,7 +52,7 @@ class LT_Dataset(Dataset):
             sample = Image.open(f).convert('RGB')
         if self.transform is not None:
             sample = self.transform(sample)
-        return sample, target 
+        return index, sample, target 
     
 
 
@@ -82,7 +82,7 @@ class LT_Dataset_Eval(Dataset):
             sample = Image.open(f).convert('RGB')
         if self.transform is not None:
             sample = self.transform(sample)
-        return sample, target 
+        return index,sample, target 
 
 
 class ImageNet_LT(object):
@@ -112,9 +112,9 @@ class ImageNet_LT(object):
         
         train_dataset = LT_Dataset(root, train_txt, transform=transform_train)
         eval_dataset = LT_Dataset_Eval(root, eval_txt, transform=transform_test, class_map=train_dataset.class_map)
-        
+        val_dataset = LT_Dataset(root, train_txt, transform=transform_train)
         self.cls_num_list = train_dataset.cls_num_list
-
+        print('train', self.cls_num_list)
         self.dist_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed else None
         self.train_instance = torch.utils.data.DataLoader(
             train_dataset,
@@ -131,3 +131,5 @@ class ImageNet_LT(object):
             eval_dataset,
             batch_size=batch_size, shuffle=False,
             num_workers=num_works, pin_memory=True)
+        self.val =  val_dataset
+        self.train_dataset = train_dataset

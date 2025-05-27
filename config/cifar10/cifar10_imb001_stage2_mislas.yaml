@@ -1,6 +1,7 @@
 name: cifar10_imb001_stage2_mislas
+uid: put_your_unique_id_here
 print_freq: 40
-workers: 16
+workers: 0
 log_dir: 'logs'
 model_dir: 'ckps'
 
@@ -10,7 +11,8 @@ data_path: './data/cifar10'
 num_classes: 10
 imb_factor: 0.01
 backbone: 'resnet32_fe'
-resume: 'Path/to/Stage1_checkpoint.pth.tar'
+resume: './cifar10_imb001_stage1_mixup10.pth.tar'
+noisemodel: 'cifar10_imb001_stage2_mislas.pth.tar'
 head_class_idx:
   - 0
   - 3
@@ -40,10 +42,10 @@ smooth_head: 0.3
 smooth_tail: 0.0
 shift_bn: False
 lr_factor: 0.5
-lr: 0.1
+lr: 0.01
 batch_size: 128
-weight_decay: 2e-4
-num_epochs: 10
+weight_decay: 5e-4
+num_epochs: 100
 momentum: 0.9
 mixup: False
 alpha: null
